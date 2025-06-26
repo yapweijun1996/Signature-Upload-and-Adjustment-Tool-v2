@@ -1,0 +1,404 @@
+
+<!DOCTYPE html>
+<html lang="en">
+	
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Signature Upload</title>
+		<style>
+			body {
+				background-color: #f3f4f6;
+				font-family: Arial, sans-serif;
+				color: #333;
+				padding: 0;
+				margin: 0;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				height: 100vh;
+				text-align: center;
+			}
+			
+			h1 {
+				margin-bottom: 20px;
+				color: #444;
+			}
+			
+			.panel {
+				background-color: #fff;
+				padding: 20px;
+				border-radius: 10px;
+				box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+				margin-bottom: 20px;
+				width: 500px;
+			}
+			
+			#canvas {
+				border: 2px dashed #ddd;
+				border-radius: 10px;
+				width: 100%;
+				max-width: 800px;
+				cursor: crosshair;
+				margin-top: 20px;
+			}
+			
+			.cropping-area {
+				display: inline-block;
+				position: relative;
+				width: 100%;
+			}
+			
+			.crop-btn,
+			.reset-panel {
+				display: flex;
+				justify-content: center;
+				gap: 10px;
+			}
+			
+			.crop-btn,
+			.reset-panel,
+			.adjustment-panel,
+			.adjustment-panel-2,
+			.adjustment-panel-3,
+			.cropping-area {
+				display: none;
+			}
+			
+			button,
+			select {
+				padding: 10px;
+				border-radius: 5px;
+				border: 1px solid #ccc;
+				outline: none;
+				cursor: pointer;
+				transition: background-color 0.3s ease;
+			}
+			
+			button:hover,
+			input[type="range"]:hover,
+			select:hover {
+				background-color: #f0f0f0;
+			}
+			
+			input[type="range"] {
+				width: 100%;
+			}
+			
+			label {
+				display: block;
+				margin-top: 10px;
+			}
+		</style>
+	</head>
+	
+	<body>
+		<div class="panel cropping-area">
+			<canvas id="canvas" width="1021" height="516"></canvas>
+			<div class="crop-btn">
+				<button id="crop">Crop</button>
+				<button id="undo" disabled>Undo Crop Selected Area</button>
+				<button id="confirm" disabled>Confirm Crop</button>
+			</div>
+		</div>
+		<div class="panel reset-panel">
+			<button id="reset">Reset All(Upload New Image)</button>
+		</div>
+		<div class="panel image-upload-panel" style="    margin-top: 10px;">
+			<div style="margin-bottom: 18px;font-size: 24px;"><b>Signature Upload and Adjustment Tool</b></div>
+			<input type="file" id="upload" accept="image/*">
+		</div>
+		<div class="panel adjustment-panel">
+			<label for="threshold">Sensitivity</label>
+			<input type="range" id="threshold" min="0" max="255" value="200">
+			
+			<label for="brightness">Brightness</label>
+			<input type="range" id="brightness" min="0" max="2" step="0.01" value="1">
+			
+			<label for="contrast">Contrast</label>
+			<input type="range" id="contrast" min="0" max="2" step="0.01" value="1">
+			
+			<label for="saturation">Saturation</label>
+			<input type="range" id="saturation" min="0" max="2" step="0.01" value="1">
+			
+			<label for="boldness">Boldness</label>
+			<input type="range" id="boldness" min="0" max="10" step="0.5" value="0"><br><br>
+		</div>
+		<div class="panel adjustment-panel-2">
+			<button id="confirm-signature">Finish Adjust Image and Crop Image</button>
+		</div>
+		<div class="panel adjustment-panel-3">
+			<select id="format">
+				<option value="png">PNG</option>
+				<option value="jpg">JPEG</option>
+			</select>
+			<button id="download">Download Adjusted Image</button>
+		</div>
+		<script>
+			document.getElementById('upload').addEventListener('change', handleFileUpload);
+			document.getElementById('threshold').addEventListener('input', debounce(updateImage, 1));
+			document.getElementById('brightness').addEventListener('input', debounce(updateImage, 1));
+			document.getElementById('contrast').addEventListener('input', debounce(updateImage, 1));
+			document.getElementById('saturation').addEventListener('input', debounce(updateImage, 1));
+			document.getElementById('boldness').addEventListener('input', debounce(updateImage, 50));
+			document.getElementById('download').addEventListener('click', downloadImage);
+			document.getElementById('crop').addEventListener('click', enableCrop);
+			document.getElementById('undo').addEventListener('click', undoCrop);
+			document.getElementById('confirm').addEventListener('click', confirmCrop);
+			document.getElementById('confirm-signature').addEventListener('click', confirmSignature);
+			document.getElementById('reset').addEventListener('click', resetAll);
+			
+			let img = new Image();
+			let isCropping = false;
+			let cropStartX, cropStartY, cropEndX, cropEndY;
+			const canvas = document.getElementById('canvas');
+			const ctx = canvas.getContext('2d');
+			let originalImgData = null;
+			let croppedImg = null;
+
+			function debounce(func, wait) {
+				let timeout;
+				return function executedFunction(...args) {
+					const later = () => {
+						clearTimeout(timeout);
+						func(...args);
+					};
+					clearTimeout(timeout);
+					timeout = setTimeout(later, wait);
+				};
+			};
+			
+			function handleFileUpload(e) {
+				const file = e.target.files[0];
+				if (file) {
+					const reader = new FileReader();
+					reader.onload = function (event) {
+						img = new Image();
+						img.onload = function () {
+							originalImgData = null;
+							croppedImg = null;
+							updateImage();
+							
+							document.querySelector('.reset-panel').style.display = 'flex';
+							document.querySelector('.image-upload-panel').style.display = 'none';
+							document.querySelector('.adjustment-panel').style.display = 'block';
+							document.querySelector('.adjustment-panel-2').style.display = 'block';
+							document.querySelector('.adjustment-panel-3').style.display = 'block';
+							document.querySelector('.cropping-area').style.display = 'block';
+						}
+						img.src = event.target.result;
+					}
+					reader.readAsDataURL(file);
+				}
+			}
+			
+			function updateImage() {
+				const threshold = document.getElementById('threshold').value;
+				const brightness = document.getElementById('brightness').value;
+				const contrast = document.getElementById('contrast').value;
+				const saturation = document.getElementById('saturation').value;
+				const boldWidth = parseFloat(document.getElementById('boldness').value); // Boldness value
+
+				canvas.width = (croppedImg || img).width;
+				canvas.height = (croppedImg || img).height;
+				ctx.filter = `brightness(${brightness}) contrast(${contrast}) saturate(${saturation})`;
+				ctx.drawImage(croppedImg || img, 0, 0);
+
+				// Apply threshold filter
+				let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+				let data = imageData.data;
+				for (let i = 0; i < data.length; i += 4) {
+					const r = data[i];
+					const g = data[i + 1];
+					const b = data[i + 2];
+					const luminosity = 0.299 * r + 0.587 * g + 0.114 * b;
+					if (luminosity > threshold) {
+						data[i] = data[i + 1] = data[i + 2] = 255; // White
+					} else {
+						data[i] = data[i + 1] = data[i + 2] = 0; // Black
+					}
+				}
+				ctx.putImageData(imageData, 0, 0);
+				originalImgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+				// Apply bold filter
+				if (boldWidth > 0) {
+					ctx.putImageData(applyBoldSignatureLines(imageData, boldWidth), 0, 0);
+					originalImgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+				}
+			}
+
+			function applyBoldSignatureLines(imageData, boldWidth) {
+				const data = imageData.data;
+				const width = imageData.width;
+				const height = imageData.height;
+				const radius = Math.ceil(boldWidth);
+				const boldPixels = new Set();
+
+				for (let y = 0; y < height; y++) {
+					for (let x = 0; x < width; x++) {
+						const index = (y * width + x) * 4;
+						if (data[index] === 0 && data[index + 1] === 0 && data[index + 2] === 0) { // Black pixel (signature line)
+							for (let dx = -radius; dx <= radius; dx++) {
+								for (let dy = -radius; dy <= radius; dy++) {
+									const distance = dx * dx + dy * dy;
+									if (distance <= boldWidth * boldWidth) {
+										const newX = x + dx;
+										const newY = y + dy;
+										if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+											const boldIndex = (newY * width + newX) * 4;
+											boldPixels.add(boldIndex);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+				const boldedData = new Uint8ClampedArray(data);
+				boldPixels.forEach(index => {
+					boldedData[index] = 0;
+					boldedData[index + 1] = 0;
+					boldedData[index + 2] = 0;
+					boldedData[index + 3] = 255;
+				});
+
+				return new ImageData(boldedData, width, height);
+			}
+			
+			function confirmSignature() {
+				document.querySelector('.adjustment-panel').style.display = 'none';
+				document.querySelector('.adjustment-panel-2').style.display = 'none';
+				document.querySelector('.crop-btn').style.display = 'flex';
+				document.getElementById('undo').disabled = true;
+				document.getElementById('confirm').disabled = true;
+				isCropping = false;
+			}
+			
+			function enableCrop() {
+				isCropping = true;
+				document.getElementById('crop').disabled = true;
+				document.getElementById('undo').disabled = false;
+				document.getElementById('confirm').disabled = false;
+				canvas.addEventListener('mousedown', startCrop);
+				canvas.addEventListener('mouseup', endCrop);
+			}
+			
+			function startCrop(e) {
+				if (isCropping) {
+					const rect = canvas.getBoundingClientRect();
+					cropStartX = (e.clientX - rect.left) * (canvas.width / rect.width);
+					cropStartY = (e.clientY - rect.top) * (canvas.height / rect.height);
+					canvas.addEventListener('mousemove', drawCropBox);
+				}
+			}
+			
+			function endCrop(e) {
+				if (isCropping) {
+					const rect = canvas.getBoundingClientRect();
+					cropEndX = (e.clientX - rect.left) * (canvas.width / rect.width);
+					cropEndY = (e.clientY - rect.top) * (canvas.height / rect.height);
+					canvas.removeEventListener('mousemove', drawCropBox);
+					undoCrop(); // Clear the crop lines before cropping
+					ctx.strokeStyle = 'red';
+					ctx.lineWidth = 2;
+					ctx.strokeRect(cropStartX, cropStartY, cropEndX - cropStartX, cropEndY - cropStartY);
+				}
+			}
+			
+			function drawCropBox(e) {
+				if (isCropping) {
+					const rect = canvas.getBoundingClientRect();
+					const currentX = (e.clientX - rect.left) * (canvas.width / rect.width);
+					const currentY = (e.clientY - rect.top) * (canvas.height / rect.height);
+					undoCrop(); // Clear the crop lines before drawing a new one
+					ctx.putImageData(originalImgData, 0, 0);
+					ctx.strokeStyle = 'red';
+					ctx.lineWidth = 2;
+					ctx.strokeRect(cropStartX, cropStartY, currentX - cropStartX, currentY - cropStartY);
+				}
+			}
+			
+			function undoCrop() {
+				if (originalImgData) {
+					ctx.putImageData(originalImgData, 0, 0);
+				}
+			}
+			
+			function confirmCrop() {
+				if (isCropping && cropEndX && cropEndY) {
+					undoCrop(); // Clear the crop lines before drawing a new one
+					
+					const cropWidth = cropEndX - cropStartX;
+					const cropHeight = cropEndY - cropStartY;
+					const croppedImgData = ctx.getImageData(cropStartX, cropStartY, cropWidth, cropHeight);
+					
+					// Disable cropping events before drawing the cropped image data
+					isCropping = false;
+					canvas.removeEventListener('mousedown', startCrop);
+					canvas.removeEventListener('mouseup', endCrop);
+					
+					// Draw cropped image data without red border
+					const tempCanvas = document.createElement('canvas');
+					const tempCtx = tempCanvas.getContext('2d');
+					tempCanvas.width = cropWidth;
+					tempCanvas.height = cropHeight;
+					tempCtx.putImageData(croppedImgData, 0, 0);
+					
+					croppedImg = new Image();
+					croppedImg.onload = function () {
+						canvas.width = cropWidth;
+						canvas.height = cropHeight;
+						ctx.filter = `brightness(${document.getElementById('brightness').value}) contrast(${document.getElementById('contrast').value}) saturate(${document.getElementById('saturation').value})`;
+						ctx.drawImage(croppedImg, 0, 0);
+						document.getElementById('undo').disabled = true;
+						document.getElementById('confirm').disabled = true;
+						
+						originalImgData = ctx.getImageData(0, 0, cropWidth, cropHeight);
+					}
+					croppedImg.src = tempCanvas.toDataURL();
+					document.getElementById('crop').disabled = false;
+				}
+			}
+			
+			function downloadImage() {
+				const format = document.getElementById('format').value;
+				const link = document.createElement('a');
+				link.download = `adjusted-signature.${format}`;
+				link.href = canvas.toDataURL(`image/${format}`);
+				link.click();
+			}
+			
+			function resetAll() {
+				// Clear canvas
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				
+				// Reset all states
+				isCropping = false;
+				originalImgData = null;
+				croppedImg = null;
+				img = new Image();
+				
+				// Reset UI elements visibility
+				document.querySelector('.reset-panel').style.display = 'none';
+				document.querySelector('.image-upload-panel').style.display = 'block';
+				document.querySelector('.adjustment-panel').style.display = 'none';
+				document.querySelector('.adjustment-panel-2').style.display = 'none';
+				document.querySelector('.adjustment-panel-3').style.display = 'none';
+				document.querySelector('.cropping-area').style.display = 'none';
+				document.querySelector('.crop-btn').style.display = 'none';
+				
+				// Reset file input
+				document.getElementById('upload').value = '';
+				
+				// Reset adjustment sliders to default values
+				document.getElementById('threshold').value = 200;
+				document.getElementById('brightness').value = 1;
+				document.getElementById('contrast').value = 1;
+				document.getElementById('saturation').value = 1;
+			}
+		</script>
+	</body>
+	
+</html>
